@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>线性回归可视化仿真实验</title>
+  <!-- 优先使用 CDN。若需完全离线：下载 plotly.min.js 到 ./libs/plotly.min.js，并改为：<script src="./libs/plotly.min.js"></script> -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root {
+      --bg: #f7f9fc;
+      --card: #ffffff;
+      --primary: #2f6db3;
+      --primary-soft: #eaf2fb;
+      --text: #243447;
+      --muted: #6f7f93;
+      --border: #d9e2ec;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .header {
+      text-align: center;
+      padding: 18px 12px 8px;
+    }
+    .header h1 { margin: 0; color: var(--primary); }
+    .header p { margin: 8px 0 0; color: var(--muted); font-size: 17px; }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr 360px;
+      gap: 14px;
+      padding: 12px;
+      min-height: calc(100vh - 110px);
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      padding: 12px;
+    }
+    .panel h3 { margin: 6px 0 12px; color: var(--primary); }
+    .control { margin-bottom: 10px; }
+    .control label { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 4px; }
+    .control input[type="range"], .control input[type="number"] { width: 100%; }
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+    button {
+      padding: 8px 10px;
+      border: 1px solid var(--primary);
+      background: var(--primary);
+      color: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.secondary { background: white; color: var(--primary); }
+    .toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 14px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 8px; }
+    .tab-btn { background: var(--primary-soft); color: var(--primary); border-color: var(--border); }
+    .tab-btn.active { background: var(--primary); color: #fff; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .plot { width: 100%; height: 520px; }
+    .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .math-box {
+      background: #fbfdff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    .eq { font-size: 19px; font-weight: 600; color: #1f4f86; margin: 6px 0; }
+    .metric { font-size: 14px; line-height: 1.6; }
+    pre {
+      white-space: pre-wrap;
+      background: #f3f7fb;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 12px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>线性回归可视化仿真实验</h1>
+    <p>从散点、残差、最小二乘到线性代数几何解释</p>
+  </div>
+
+  <div class="layout">
+    <div class="card panel">
+      <h3>参数控制面板</h3>
+      <div id="controls"></div>
+      <div class="btn-row">
+        <button id="regenBtn">重新生成数据</button>
+        <button class="secondary" id="fitBtn">一键计算最小二乘解</button>
+      </div>
+      <label class="toggle"><input type="checkbox" id="showResidual" checked />显示残差线</label>
+      <label class="toggle"><input type="checkbox" id="showBest" checked />显示最优拟合线</label>
+      <label class="toggle"><input type="checkbox" id="showMatrix" checked />显示矩阵解释</label>
+      <p class="hint">提示：先拖动真实参数和噪声生成数据，再调整手动参数观察误差与几何意义。</p>
+    </div>
+
+    <div class="card">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="tab1">一元回归</button>
+        <button class="tab-btn" data-tab="tab2">SSE 参数空间</button>
+        <button class="tab-btn" data-tab="tab3">二元回归平面</button>
+      </div>
+      <div id="tab1" class="tab-content active"><div id="plot1" class="plot"></div></div>
+      <div id="tab2" class="tab-content"><div id="plot2" class="plot"></div></div>
+      <div id="tab3" class="tab-content"><div id="plot3" class="plot"></div><p class="hint">一个样本是三维空间中的一个点，所有预测值组成一个平面。</p></div>
+    </div>
+
+    <div class="card panel">
+      <h3>数学解释与模型指标</h3>
+      <div class="math-box">
+        <div id="manualEq" class="eq"></div>
+        <div id="bestEq" class="eq"></div>
+      </div>
+      <div class="math-box">
+        <div class="metric" id="manualMetrics"></div>
+        <hr />
+        <div class="metric" id="bestMetrics"></div>
+      </div>
+      <div class="math-box" id="matrixSection">
+        <div class="eq" style="font-size:17px;">Y = Xβ + ε，Ŷ = Xβ，e = Y - Ŷ</div>
+        <div class="eq" style="font-size:17px;">β̂ = (XᵀX)⁻¹XᵀY</div>
+        <pre id="matrixPreview"></pre>
+        <div id="xteText" class="hint"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== 可复现随机数（LCG） =====
+    function createRng(seed) {
+      let s = (seed >>> 0) || 1;
+      return function () {
+        s = (1664525 * s + 1013904223) >>> 0;
+        return s / 4294967296;
+      };
+    }
+    // Box-Muller 生成标准正态
+    function randn(rng) {
+      const u = Math.max(rng(), 1e-12), v = rng();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    }
+
+    const config = [
+      ["n", "样本数量 n", 5, 80, 30, 1],
+      ["beta0", "真实截距 β0", -20, 20, 5, 0.1],
+      ["beta1", "真实斜率 β1", -5, 5, 2, 0.1],
+      ["sigma", "噪声强度 σ", 0, 20, 5, 0.1],
+      ["b0", "手动截距 b0", -30, 30, 0, 0.1],
+      ["b1", "手动斜率 b1", -8, 8, 1, 0.1]
+    ];
+
+    const state = { seed: 42, x: [], y: [], x1_2: [], x2_2: [], y2: [], b2true: 1.5 };
+    const controlsEl = document.getElementById("controls");
+
+    function addControl([id, label, min, max, val, step]) {
+      const div = document.createElement("div");
+      div.className = "control";
+      div.innerHTML = `<label>${label}<span id="${id}Val">${val}</span></label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${val}">`;
+      controlsEl.appendChild(div);
+    }
+    config.forEach(addControl);
+    const seedDiv = document.createElement("div");
+    seedDiv.className = "control";
+    seedDiv.innerHTML = '<label>随机种子 seed</label><input id="seed" type="number" value="42" step="1">';
+    controlsEl.appendChild(seedDiv);
+
+    const getVal = id => parseFloat(document.getElementById(id).value);
+    const fmt = x => (Math.abs(x) >= 1000 ? x.toExponential(3) : x.toFixed(4));
+
+    function generateData() {
+      const n = Math.round(getVal("n"));
+      const beta0 = getVal("beta0"), beta1 = getVal("beta1"), sigma = getVal("sigma");
+      state.seed = parseInt(document.getElementById("seed").value || "42", 10);
+      const rng = createRng(state.seed);
+      state.x = []; state.y = [];
+      state.x1_2 = []; state.x2_2 = []; state.y2 = [];
+
+      // 生成一元回归数据：y = beta0 + beta1*x + 噪声
+      for (let i = 0; i < n; i++) {
+        const x = -10 + 20 * rng();
+        const y = beta0 + beta1 * x + sigma * randn(rng);
+        state.x.push(x); state.y.push(y);
+      }
+
+      // 生成二元回归数据：y = beta0 + beta1*x1 + beta2*x2 + noise
+      for (let i = 0; i < n; i++) {
+        const x1 = -8 + 16 * rng();
+        const x2 = -8 + 16 * rng();
+        const y = beta0 + beta1 * x1 + state.b2true * x2 + sigma * randn(rng);
+        state.x1_2.push(x1); state.x2_2.push(x2); state.y2.push(y);
+      }
+    }
+
+    function fitSimple(x, y) {
+      const n = x.length;
+      const mx = x.reduce((a,b)=>a+b,0)/n, my = y.reduce((a,b)=>a+b,0)/n;
+      let num = 0, den = 0;
+      for (let i = 0; i < n; i++) { num += (x[i]-mx)*(y[i]-my); den += (x[i]-mx)*(x[i]-mx); }
+      const b1 = den === 0 ? 0 : num / den;
+      const b0 = my - b1 * mx;
+      return { b0, b1 };
+    }
+
+    function metrics(x, y, b0, b1) {
+      const n = x.length;
+      let sse = 0; const yhat = [], e = [];
+      const my = y.reduce((a,b)=>a+b,0)/n;
+      let sst = 0;
+      for (let i=0;i<n;i++) {
+        const yh = b0 + b1*x[i];
+        const er = y[i] - yh;
+        yhat.push(yh); e.push(er);
+        sse += er*er;
+        sst += (y[i]-my)*(y[i]-my);
+      }
+      const mse = sse/n, rmse = Math.sqrt(mse), r2 = sst===0?1:1-sse/sst;
+      return { sse, mse, rmse, r2, yhat, e };
+    }
+
+    // 3x3 高斯消元，用于二元回归正规方程
+    function solve3(A, b) {
+      const M = A.map((row,i)=>[...row,b[i]]);
+      for (let c=0;c<3;c++) {
+        let p=c; for (let r=c+1;r<3;r++) if (Math.abs(M[r][c])>Math.abs(M[p][c])) p=r;
+        [M[c],M[p]]=[M[p],M[c]];
+        const piv = M[c][c] || 1e-12;
+        for (let j=c;j<4;j++) M[c][j]/=piv;
+        for (let r=0;r<3;r++) if (r!==c) {
+          const f = M[r][c];
+          for (let j=c;j<4;j++) M[r][j]-=f*M[c][j];
+        }
+      }
+      return [M[0][3],M[1][3],M[2][3]];
+    }
+
+    function fitMultiple2() {
+      const x1 = state.x1_2, x2 = state.x2_2, y = state.y2, n = y.length;
+      let s1=n,sx1=0,sx2=0,sx1x1=0,sx2x2=0,sx1x2=0,sy=0,sx1y=0,sx2y=0;
+      for (let i=0;i<n;i++) {
+        sx1+=x1[i]; sx2+=x2[i]; sy+=y[i];
+        sx1x1+=x1[i]*x1[i]; sx2x2+=x2[i]*x2[i]; sx1x2+=x1[i]*x2[i];
+        sx1y+=x1[i]*y[i]; sx2y+=x2[i]*y[i];
+      }
+      const A=[[s1,sx1,sx2],[sx1,sx1x1,sx1x2],[sx2,sx1x2,sx2x2]];
+      const B=[sy,sx1y,sx2y];
+      return solve3(A,B);
+    }
+
+    function updateAll() {
+      config.forEach(([id]) => document.getElementById(id+"Val").textContent = getVal(id));
+      const b0 = getVal("b0"), b1 = getVal("b1");
+      const best = fitSimple(state.x, state.y);
+      const mManual = metrics(state.x, state.y, b0, b1);
+      const mBest = metrics(state.x, state.y, best.b0, best.b1);
+
+      document.getElementById("manualEq").textContent = `当前手动模型：ŷ = ${fmt(b0)} + ${fmt(b1)}x`;
+      document.getElementById("bestEq").textContent = `最小二乘模型：ŷ = ${fmt(best.b0)} + ${fmt(best.b1)}x`;
+      document.getElementById("manualMetrics").innerHTML = `手动模型指标：<br>SSE=${fmt(mManual.sse)}，MSE=${fmt(mManual.mse)}，RMSE=${fmt(mManual.rmse)}，R²=${fmt(mManual.r2)}`;
+      document.getElementById("bestMetrics").innerHTML = `最小二乘模型指标：<br>SSE=${fmt(mBest.sse)}，MSE=${fmt(mBest.mse)}，RMSE=${fmt(mBest.rmse)}，R²=${fmt(mBest.r2)}`;
+
+      drawPlot1(b0,b1,best,mManual);
+      drawPlot2(b0,b1,best);
+      drawPlot3();
+
+      // X^T e 约等于 0：在最小二乘解处，残差与设计矩阵列空间正交
+      const sumE = mBest.e.reduce((a,b)=>a+b,0);
+      const sumXE = state.x.reduce((a,x,i)=>a + x*mBest.e[i],0);
+      const rows = Math.min(5, state.x.length);
+      let px = "X(前5行) =\n", py = "Y(前5行) =\n";
+      for (let i=0;i<rows;i++) {
+        px += `[1, ${fmt(state.x[i])}]\n`;
+        py += `[${fmt(state.y[i])}]\n`;
+      }
+      document.getElementById("matrixPreview").textContent = px + "\n" + py;
+      document.getElementById("xteText").textContent = `Xᵀe ≈ [${fmt(sumE)}, ${fmt(sumXE)}]。在最小二乘解下，Xᵀe 约等于 0，表示残差向量与 X 的列空间正交。`;
+      document.getElementById("matrixSection").style.display = document.getElementById("showMatrix").checked ? "block" : "none";
+    }
+
+    function drawPlot1(b0,b1,best,mManual) {
+      const traces = [{ x: state.x, y: state.y, mode: "markers", name: "样本点", marker: { color: "#2f6db3", size: 8 } }];
+      const xmin = Math.min(...state.x), xmax = Math.max(...state.x);
+      traces.push({ x:[xmin,xmax], y:[b0+b1*xmin,b0+b1*xmax], mode:"lines", name:"手动拟合线", line:{color:"#0f9d58", width:3} });
+      if (document.getElementById("showBest").checked) {
+        traces.push({ x:[xmin,xmax], y:[best.b0+best.b1*xmin,best.b0+best.b1*xmax], mode:"lines", name:"最小二乘拟合线", line:{color:"#d1495b", width:3, dash:"dash"} });
+      }
+      if (document.getElementById("showResidual").checked) {
+        for (let i=0;i<state.x.length;i++) {
+          traces.push({ x:[state.x[i],state.x[i]], y:[state.y[i], b0+b1*state.x[i]], mode:"lines", showlegend:i===0, name:"残差", line:{color:"#98a2ad", width:1} });
+        }
+      }
+      Plotly.newPlot("plot1", traces, {
+        title:`一元线性回归（手动 SSE=${fmt(mManual.sse)}）`,
+        margin:{t:45,l:50,r:20,b:45}, paper_bgcolor:"#fff", plot_bgcolor:"#fff",
+        xaxis:{title:"x"}, yaxis:{title:"y"}, legend:{orientation:"h"}
+      }, {responsive:true});
+    }
+
+    function drawPlot2(b0,b1,best) {
+      const b0Vals = [], b1Vals = [], z = [];
+      for (let i=0;i<45;i++) b0Vals.push(-30 + i*(60/44));
+      for (let j=0;j<45;j++) b1Vals.push(-8 + j*(16/44));
+      for (let j=0;j<b1Vals.length;j++) {
+        const row=[];
+        for (let i=0;i<b0Vals.length;i++) row.push(metrics(state.x,state.y,b0Vals[i],b1Vals[j]).sse);
+        z.push(row);
+      }
+      Plotly.newPlot("plot2", [
+        {x:b0Vals,y:b1Vals,z:z,type:"heatmap",colorscale:"Blues",name:"SSE",hovertemplate:"b0=%{x:.2f}<br>b1=%{y:.2f}<br>SSE=%{z:.2f}<extra></extra>"},
+        {x:[b0],y:[b1],mode:"markers",type:"scatter",name:"当前手动参数",marker:{size:11,color:"#0f9d58",symbol:"x"}},
+        {x:[best.b0],y:[best.b1],mode:"markers",type:"scatter",name:"最小二乘解",marker:{size:11,color:"#d1495b"}}
+      ], {
+        title:"SSE 参数空间热力图", margin:{t:45,l:55,r:20,b:45},
+        xaxis:{title:"b0"}, yaxis:{title:"b1"}, paper_bgcolor:"#fff", plot_bgcolor:"#fff"
+      }, {responsive:true});
+    }
+
+    function drawPlot3() {
+      const [b0,b1,b2] = fitMultiple2();
+      const x1 = state.x1_2, x2 = state.x2_2, y = state.y2;
+      const g = 15, xs=[], ys=[];
+      for (let i=0;i<g;i++) { xs.push(-8+i*(16/(g-1))); ys.push(-8+i*(16/(g-1))); }
+      const zz = ys.map(v2 => xs.map(v1 => b0 + b1*v1 + b2*v2));
+      Plotly.newPlot("plot3", [
+        {type:"scatter3d",mode:"markers",x:x1,y:x2,z:y,name:"样本点",marker:{size:3,color:"#2f6db3"}},
+        {type:"surface",x:xs,y:ys,z:zz,name:"最小二乘拟合平面",opacity:0.7,colorscale:"Blues",showscale:false}
+      ], {
+        title:`二元回归平面：ŷ=${fmt(b0)}+${fmt(b1)}x1+${fmt(b2)}x2`,
+        margin:{t:45,l:0,r:0,b:0},
+        scene:{xaxis:{title:"x1"},yaxis:{title:"x2"},zaxis:{title:"y"}},
+        paper_bgcolor:"#fff"
+      }, {responsive:true});
+    }
+
+    document.getElementById("regenBtn").addEventListener("click", ()=>{ generateData(); updateAll(); });
+    document.getElementById("fitBtn").addEventListener("click", ()=>{
+      const best = fitSimple(state.x, state.y);
+      document.getElementById("b0").value = best.b0;
+      document.getElementById("b1").value = best.b1;
+      updateAll();
+    });
+
+    config.forEach(([id]) => document.getElementById(id).addEventListener("input", () => {
+      if (["n","beta0","beta1","sigma"].includes(id)) generateData();
+      updateAll();
+    }));
+    ["seed","showResidual","showBest","showMatrix"].forEach(id =>
+      document.getElementById(id).addEventListener("input", ()=>{ if(id==="seed") generateData(); updateAll(); })
+    );
+
+    document.querySelectorAll(".tab-btn").forEach(btn=>btn.addEventListener("click",()=>{
+      document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(c=>c.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById(btn.dataset.tab).classList.add("active");
+    }));
+
+    generateData();
+    updateAll();
+  </script>
+</body>
+</html>
